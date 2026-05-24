@@ -1,0 +1,46 @@
+# ==========================================
+# Sensitive Configuration (Do NOT commit secrets!)
+# ==========================================
+**/src/main/resources/application.properties
+
+# ==========================================
+# Maven / Build Artifacts
+# ==========================================
+target/
+**/target/
+*.jar
+*.war
+*.ear
+*.class
+
+# ==========================================
+# IDEs & Editors
+# ==========================================
+.idea/
+*.iml
+*.iws
+.classpath
+.project
+.settings/
+.factorypath
+.nb-configuration/
+nbactions.xml
+
+# ==========================================
+# Operating System files
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ==========================================
+# Logs and temporary files
+# ==========================================
+*.log
+tmp/
+temp/
+/order-parser/src/main/resources/application.properties

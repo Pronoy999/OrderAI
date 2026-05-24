@@ -1,0 +1,20 @@
+# OrderAI Configuration Settings
+#
+# Note: You can define these settings directly here for local development.
+# In Fly.dev or container environments, these can be overridden using environment variables
+# (GMAIL_EMAIL, GMAIL_APP_PASSWORD, GEMINI_API_KEY, SPREADSHEET_ID, GOOGLE_CREDENTIALS_JSON).
+
+# Gmail Configurations
+gmail.email=YOUR_GMAIL_EMAIL@gmail.com
+gmail.app.password=YOUR_16_CHAR_GMAIL_APP_PASSWORD
+
+# Gemini API Key
+gemini.api.key=YOUR_GEMINI_API_KEY
+
+# Google Sheets Integration
+spreadsheet.id=YOUR_GOOGLE_SPREADSHEET_ID
+google.credentials.json={"type": "service_account", "project_id": "...", "private_key_id": "...", "private_key": "...", "client_email": "...", "client_id": "..."}
+
+# Application Tuning
+poll.interval.minutes=30
+dry.run=true

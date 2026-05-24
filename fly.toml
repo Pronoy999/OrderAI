@@ -1,0 +1,16 @@
+# fly.toml file for OrderAI
+#
+# Reference: https://fly.io/docs/reference/configuration/
+
+app = "order-ai"
+primary_region = "syd" # Feel free to update to your preferred region (e.g. 'bom', 'syd', 'lax', 'ams')
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Define resources for our daemon worker
+# A shared 1-CPU 512MB RAM instance is more than sufficient and extremely cost-effective
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
