@@ -35,7 +35,9 @@ public class GeminiClient {
     public Order parseBigBasketEmail(String emailSubject, String emailBody) {
         logger.info("Sending email content to Gemini API for parsing & categorization...");
         try {
-            String prompt = constructPrompt(emailSubject, emailBody);
+            // 1. Clean the HTML down to text to prevent HttpTimeoutExceptions
+            String cleanBody = cleanHtml(emailBody);
+            String prompt = constructPrompt(emailSubject, cleanBody);
 
             // Construct JSON request body for Gemini API
             ObjectNode rootNode = objectMapper.createObjectNode();
@@ -44,19 +46,21 @@ public class GeminiClient {
             ArrayNode partsArray = contentNode.putArray("parts");
             partsArray.addObject().put("text", prompt);
 
+            // 2. Enforce Strict Server-Side JSON Schema
             ObjectNode genConfig = rootNode.putObject("generationConfig");
             genConfig.put("responseMimeType", "application/json");
+            genConfig.set("responseSchema", createOrderResponseSchema());
 
             String requestBody = objectMapper.writeValueAsString(rootNode);
 
-            // Send request to Gemini 2.5 Flash API
+            // Update URL to a fast, stable release model
             String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                    .timeout(Duration.ofSeconds(45))
+                    .timeout(Duration.ofSeconds(45)) // Safe processing buffer
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -66,11 +70,10 @@ public class GeminiClient {
                 return null;
             }
 
-            // Extract the generated JSON string
             JsonNode responseJson = objectMapper.readTree(response.body());
             JsonNode candidates = responseJson.path("candidates");
             if (candidates.isMissingNode() || candidates.size() == 0) {
-                logger.error("No completion candidates returned by Gemini: {}", response.body());
+                logger.error("No completion candidates returned by Gemini.");
                 return null;
             }
 
@@ -82,17 +85,14 @@ public class GeminiClient {
                     .asText();
 
             logger.info("Successfully received response from Gemini API.");
-            logger.debug("Raw JSON from Gemini: {}", jsonText);
 
-            // Parse returned JSON text into Order model
+            // Parse guaranteed valid schema structure
             JsonNode orderJson = objectMapper.readTree(jsonText);
-
             String orderId = orderJson.path("orderId").asText(null);
             String orderDate = orderJson.path("orderDate").asText(null);
 
-            // In case Gemini fails to find order ID or Date in the email
             if (orderId == null || orderId.trim().isEmpty() || "null".equalsIgnoreCase(orderId)) {
-                logger.warn("Gemini could not find orderId in the email. Using subject hash.");
+                logger.warn("Gemini could not locate orderId. Defaulting to subject hash.");
                 orderId = "BB-HASH-" + Math.abs(emailSubject.hashCode());
             }
 
@@ -111,44 +111,73 @@ public class GeminiClient {
 
             return new Order(orderId, orderDate, items);
 
+        } catch (java.net.http.HttpTimeoutException e) {
+            logger.error("Request timed out! The email size might still be too large or network link choked.", e);
+            return null;
         } catch (Exception e) {
             logger.error("Failed to call or parse Gemini API response", e);
             return null;
         }
     }
 
-    private String constructPrompt(String subject, String htmlBody) {
-        return "You are an expert order confirmation receipts parser and item classifier.\n" +
-                "Given the subject and the HTML body of a BigBasket order email, extract details and structure them. \n" +
-                "\n" +
+    /**
+     * Aggressively strips out style definitions, script macros, and HTML structural layout junk.
+     * Drops string context size down by up to 90%, preventing timeouts.
+     */
+    private String cleanHtml(String html) {
+        if (html == null) return "";
+        String text = html;
+        text = text.replaceAll("(?s)<style>.*?</style>", "");
+        text = text.replaceAll("(?s)<script>.*?</script>", "");
+        text = text.replaceAll("<[^>]*>", " ");
+        text = text.replaceAll("\\s+", " ").trim();
+
+        // Hard-cap the text length at 12,000 characters to keep payload safe
+        if (text.length() > 12000) {
+            text = text.substring(0, 12000);
+        }
+        return text;
+    }
+
+    /**
+     * Builds the OpenAPI Schema structure to guarantee the model's response matches exactly.
+     */
+    private ObjectNode createOrderResponseSchema() {
+        ObjectNode schema = objectMapper.createObjectNode();
+        schema.put("type", "OBJECT");
+
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("orderId").put("type", "STRING");
+        properties.putObject("orderDate").put("type", "STRING");
+
+        ObjectNode itemsSchema = properties.putObject("items");
+        itemsSchema.put("type", "ARRAY");
+        ObjectNode itemItems = itemsSchema.putObject("items");
+        itemItems.put("type", "OBJECT");
+
+        ObjectNode itemProps = itemItems.putObject("properties");
+        itemProps.putObject("name").put("type", "STRING");
+        itemProps.putObject("quantity").put("type", "STRING");
+        itemProps.putObject("price").put("type", "NUMBER");
+
+        ObjectNode categoryEnum = itemProps.putObject("category");
+        categoryEnum.put("type", "STRING");
+        ArrayNode enums = categoryEnum.putArray("enum");
+        enums.add("Healthy").add("Snacks").add("Meats").add("Other");
+
+        return schema;
+    }
+
+    private String constructPrompt(String subject, String cleanBody) {
+        return "Extract matching details from this BigBasket confirmation email.\n" +
                 "EMAIL SUBJECT: " + subject + "\n" +
-                "EMAIL HTML BODY:\n" + htmlBody + "\n\n" +
-                "INSTRUCTIONS:\n" +
-                "1. Find and extract the unique 'orderId' (sometimes formatted as 'Order ID: 12345678' or similar in the text).\n" +
-                "2. Find and extract the 'orderDate' in 'YYYY-MM-DD' format.\n" +
-                "3. Find the table or list of items ordered. For each item, extract:\n" +
-                "   - 'name': The brand and product name (e.g. 'Fresho Tomato - Local', 'Parle-G Biscuits').\n" +
-                "   - 'quantity': The pack size, volume, weight, or count (e.g. '1 kg', '500 g', '1 pc', 'Pack of 2').\n" +
-                "   - 'price': The final actual price charged for the item (numeric double, in INR. Do not include currency symbols).\n" +
-                "   - 'category': Classify the item into EXACTLY one of these four categories based on semantic understanding of the food/product name:\n" +
-                "     - 'Healthy': Raw fresh vegetables, fresh fruits, whole grains (brown rice, quinoa, millet), oats, sprouts, seeds (chia, flax), unsalted organic raw nuts, green tea, fresh eggs, paneer/tofu, unsweetened almond/soy milk, sugar-free health supplements, organic cooking oils (olive oil, virgin coconut oil).\n" +
-                "     - 'Snacks': Potato chips, crisps, namkeen, bhujia, cookies, cream biscuits, chocolates, candies, sugary carbonated soft drinks, sodas, energy drinks, ice creams, ready-to-eat instant noodles, pasta, packaged cakes.\n" +
-                "     - 'Meats': Raw fresh poultry (chicken breasts, drumsticks), red meat (mutton, pork, beef), fresh fish, prawns, crabs, other seafood.\n" +
-                "     - 'Other': Standard household necessities and regular pantry items. This includes cleaning supplies, detergents, soaps, shampoos, personal care products, regular flour/atta, regular white rice, table salt, refined white sugar, regular refined cooking oils, cow milk, butter, regular cheese, and white bread.\n" +
-                "\n" +
-                "RESPONSE FORMAT:\n" +
-                "You must return the parsed results strictly in JSON matching the schema below. Do not include markdown code block syntax (like ```json) in the response text itself, just raw JSON:\n" +
-                "{\n" +
-                "  \"orderId\": \"string\",\n" +
-                "  \"orderDate\": \"string in YYYY-MM-DD format\",\n" +
-                "  \"items\": [\n" +
-                "    {\n" +
-                "      \"name\": \"string\",\n" +
-                "      \"quantity\": \"string\",\n" +
-                "      \"price\": 123.45,\n" +
-                "      \"category\": \"Healthy | Snacks | Meats | Other\"\n" +
-                "    }\n" +
-                "  ]\n" +
-                "}";
+                "EMAIL BODY:\n" + cleanBody + "\n\n" +
+                "CRITICAL EXTRACTION RULE:\n" +
+                "For the item price, you MUST extract the **Sub Total** (the final total price charged for that item row based on quantity), NOT the individual item unit price. For example, if an item says '2 units x Rs. 40 = Rs. 80', extract 80.00.\n\n" +
+                "CATEGORIZATION RULES:\n" +
+                "- 'Healthy': Raw fresh vegetables, fruits, whole grains, nuts, seeds, organic oils, eggs, paneer, tofu.\n" +
+                "- 'Snacks': Chips, namkeen, biscuits, chocolates, candies, sodas, carbonated drinks, instant noodles.\n" +
+                "- 'Meats': Fresh poultry, meat, fish, seafood.\n" +
+                "- 'Other': Cleaning supplies, household essentials, atta, white sugar, regular white rice, cow milk, butter, cheese, bread.";
     }
 }

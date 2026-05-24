@@ -41,6 +41,9 @@ public class Config {
         this.spreadsheetId = getRequiredSetting("SPREADSHEET_ID", "spreadsheet.id", props).trim();
         this.googleCredentialsJson = getRequiredSetting("GOOGLE_CREDENTIALS_JSON", "google.credentials.json", props).trim();
 
+        logger.info("DEBUG: Loaded Email Length = {}, Value = [{}]", this.gmailEmail.length(), this.gmailEmail);
+        logger.info("DEBUG: Loaded Password Length = {}", this.gmailAppPassword.length());
+
         this.pollIntervalMinutes = getOptionalSettingInt("POLL_INTERVAL_MINUTES", "poll.interval.minutes", 30, props);
         this.dryRun = getOptionalSettingBoolean("DRY_RUN", "dry.run", false, props);
     }

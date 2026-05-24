@@ -3,7 +3,7 @@
 # Reference: https://fly.io/docs/reference/configuration/
 
 app = "order-ai"
-primary_region = "syd" # Feel free to update to your preferred region (e.g. 'bom', 'syd', 'lax', 'ams')
+primary_region = "bom"
 
 [build]
   dockerfile = "Dockerfile"

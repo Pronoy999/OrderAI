@@ -24,20 +24,35 @@ public class SheetsClient {
     private final String spreadsheetId;
     private final Sheets sheetsService;
 
-    public SheetsClient(String spreadsheetId, String credentialsJson) throws Exception {
+    public SheetsClient(String spreadsheetId, String rawJsonCredentials) throws Exception {
         this.spreadsheetId = spreadsheetId;
 
-        // Initialize Google Sheets API with Service Account credentials
-        InputStream credentialsStream = new ByteArrayInputStream(credentialsJson.getBytes(StandardCharsets.UTF_8));
+        String credentialsStr = rawJsonCredentials.trim();
+
+        // Auto-detect Base64: If it doesn't start with a JSON bracket '{', decode it first!
+        if (!credentialsStr.startsWith("{")) {
+            logger.info("Base64 layout detected for Google Sheets credentials. Decoding string...");
+            byte[] decodedBytes = Base64.getDecoder().decode(credentialsStr);
+            credentialsStr = new String(decodedBytes, StandardCharsets.UTF_8);
+        }
+
+        // Convert the validated JSON string directly into a byte stream for Google Auth
+        ByteArrayInputStream credentialsStream = new ByteArrayInputStream(
+                credentialsStr.getBytes(StandardCharsets.UTF_8)
+        );
+
         GoogleCredentials credentials = GoogleCredentials.fromStream(credentialsStream)
                 .createScoped(Collections.singleton(SheetsScopes.SPREADSHEETS));
 
+        // Assemble the authenticated Sheet interaction portal
         this.sheetsService = new Sheets.Builder(
                 GoogleNetHttpTransport.newTrustedTransport(),
                 GsonFactory.getDefaultInstance(),
                 new HttpCredentialsAdapter(credentials))
-                .setApplicationName("OrderAI")
+                .setApplicationName("OrderAI-Logger")
                 .build();
+
+        logger.info("Successfully established connection to Google Sheets API.");
     }
 
     public boolean isOrderAlreadyLogged(String orderId) {
@@ -91,7 +106,7 @@ public class SheetsClient {
             }
 
             ValueRange body = new ValueRange().setValues(rowsToAppend);
-            
+
             // Append starting at the next empty row in columns A to F
             String range = "A:F";
             AppendValuesResponse result = sheetsService.spreadsheets().values()
@@ -116,11 +131,11 @@ public class SheetsClient {
             List<List<Object>> values = response.getValues();
             if (values == null || values.isEmpty() || values.get(0).isEmpty()) {
                 logger.info("Sheet appears to be empty. Creating header row...");
-                
+
                 List<List<Object>> headerValues = Collections.singletonList(
                         Arrays.asList("Order ID", "Order Date", "Item Name", "Quantity", "Price", "Category")
                 );
-                
+
                 ValueRange headerBody = new ValueRange().setValues(headerValues);
                 sheetsService.spreadsheets().values()
                         .append(spreadsheetId, "A:F", headerBody)

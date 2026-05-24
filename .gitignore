@@ -44,3 +44,4 @@ Thumbs.db
 tmp/
 temp/
 /order-parser/src/main/resources/application.properties
+/order-parser/src/main/resources/google-client-secret.json
